@@ -227,6 +227,22 @@
   }
   .card:hover .card-menu { opacity:1; }
   .card-menu:hover { background:var(--border); color:var(--text-primary); }
+  .card-action {
+    display:flex; flex-direction:column; gap:3px;
+    background: rgba(99,102,241,.07);
+    border-left: 2px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    padding: 7px 10px;
+    margin-top: 4px; margin-bottom: 9px;
+  }
+  .card-action-label {
+    font-size:10px; font-weight:700; letter-spacing:.4px;
+    color: var(--accent-light); text-transform:uppercase;
+  }
+  .card-action-text {
+    font-size:12px; color:var(--text-secondary); line-height:1.5;
+    white-space: pre-wrap;
+  }
   .card-desc {
     font-size:12px; color:var(--text-secondary); line-height:1.5;
     margin-bottom:9px;
@@ -434,6 +450,13 @@
     <div class="fg">
       <label>내용 / 문제점</label>
       <textarea class="fi" id="mc-desc" placeholder="현재 상황, 문제점, 메모를 간략히 적어주세요..."></textarea>
+    </div>
+    <div class="fg">
+      <label style="display:flex;align-items:center;gap:6px">
+        <span style="background:var(--accent);color:#fff;font-size:10px;padding:2px 7px;border-radius:4px;font-weight:700">팀장 액션</span>
+        해결 방향 / 액션 플랜
+      </label>
+      <textarea class="fi" id="mc-action" placeholder="해결 예정 사항, 진행 중인 액션, 관련 담당자 등을 적어주세요..." style="min-height:70px"></textarea>
     </div>
     <div class="grid2">
       <div class="fg">
@@ -738,6 +761,7 @@ function openAdd(status) {
   document.getElementById('mc-title').textContent    = '카드 추가';
   document.getElementById('mc-title-in').value       = '';
   document.getElementById('mc-desc').value           = '';
+  document.getElementById('mc-action').value         = '';
   document.getElementById('mc-assignee').value       = '-1';
   document.getElementById('mc-priority').value       = 'medium';
   document.getElementById('mc-ticket').value         = '';
@@ -755,7 +779,8 @@ function openEdit(id) {
   editId = id;
   document.getElementById('mc-title').textContent    = '카드 수정';
   document.getElementById('mc-title-in').value       = c.title;
-  document.getElementById('mc-desc').value           = c.desc || '';
+  document.getElementById('mc-desc').value           = c.desc   || '';
+  document.getElementById('mc-action').value         = c.action || '';
   document.getElementById('mc-assignee').value       = c.assignee ?? '-1';
   document.getElementById('mc-priority').value       = c.priority || 'medium';
   document.getElementById('mc-ticket').value         = c.ticket || '';
@@ -781,6 +806,7 @@ async function saveCard() {
   const data = {
     title,
     desc:      document.getElementById('mc-desc').value.trim(),
+    action:    document.getElementById('mc-action').value.trim(),
     assignee:  (() => { const v = document.getElementById('mc-assignee').value; return v==='-1' ? null : +v; })(),
     priority:  document.getElementById('mc-priority').value,
     ticket:    document.getElementById('mc-ticket').value.trim(),
@@ -857,6 +883,11 @@ function cardHTML(c) {
       <button class="card-menu" onclick="showCtx(event,'${c.id}')">⋯</button>
     </div>
     ${c.desc ? `<div class="card-desc">${esc(c.desc)}</div>` : ''}
+    ${c.action ? `
+    <div class="card-action">
+      <span class="card-action-label">▶ 팀장 액션</span>
+      <span class="card-action-text">${esc(c.action)}</span>
+    </div>` : ''}
     <div class="card-footer">
       <div class="card-tags">
         ${c.ticket ? `<span class="tag tag-ticket">${esc(c.ticket)}</span>` : ''}
