@@ -381,9 +381,7 @@
 <div class="toolbar">
   <span class="filter-label">담당자</span>
   <button class="chip active" data-f="all" onclick="setFilter('all')">전체</button>
-  <button class="chip" id="f0" data-f="0" onclick="setFilter('0')"></button>
-  <button class="chip" id="f1" data-f="1" onclick="setFilter('1')"></button>
-  <button class="chip" id="f2" data-f="2" onclick="setFilter('2')"></button>
+  <span id="member-chips" style="display:contents"></span>
   <div class="toolbar-divider"></div>
   <div class="stat-badge"><span class="stat-dot" style="background:var(--col-blocked)"></span><span id="s-blocked">0 병목</span></div>
   <div class="stat-badge"><span class="stat-dot" style="background:var(--col-inprog)"></span><span id="s-inprog">0 진행중</span></div>
@@ -442,9 +440,6 @@
         <label>담당자</label>
         <select class="fi" id="mc-assignee">
           <option value="-1">미배정</option>
-          <option value="0">—</option>
-          <option value="1">—</option>
-          <option value="2">—</option>
         </select>
       </div>
       <div class="fg">
@@ -490,21 +485,9 @@
       <input class="fi" id="s-bname" type="text" placeholder="예: QA Team Board">
     </div>
     <div class="fg">
-      <label>팀원 이름</label>
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:12px;color:var(--text-muted);width:40px;flex-shrink:0">팀장</span>
-          <input class="fi" id="s-m0" type="text" placeholder="팀장 이름">
-        </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:12px;color:var(--text-muted);width:40px;flex-shrink:0">시니어</span>
-          <input class="fi" id="s-m1" type="text" placeholder="팀원 1 이름">
-        </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:12px;color:var(--text-muted);width:40px;flex-shrink:0">시니어</span>
-          <input class="fi" id="s-m2" type="text" placeholder="팀원 2 이름">
-        </div>
-      </div>
+      <label>팀원</label>
+      <div id="members-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      <button class="btn btn-ghost btn-sm" onclick="addMember()" style="margin-top:10px">＋ 팀원 추가</button>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost btn-sm" onclick="closeSettings()">취소</button>
@@ -545,11 +528,20 @@ const firebaseConfig = {
 // ──────────────────────────────────────────────
 // Constants & State
 // ──────────────────────────────────────────────
-const COLORS = ['#6366f1','#8b5cf6','#06b6d4'];
-const COLS   = ['todo','inprog','blocked','done'];
+const MEMBER_COLORS = ['#6366f1','#8b5cf6','#06b6d4','#f59e0b','#10b981','#ec4899','#f97316','#14b8a6','#a855f7','#3b82f6'];
+const ROLE_LABELS   = { manager:'Manager', senior:'시니어QA (파트장)', qa:'QA', junior:'Junior QA' };
+const COLS          = ['todo','inprog','blocked','done'];
 
 let cards        = [];
-let cfg          = { boardName:'QA Team Board', members:['QA 팀장','Senior QA 1','Senior QA 2'] };
+let cfg          = {
+  boardName: 'QA Team Board',
+  members: [
+    { name: 'QA 팀장',    role: 'manager' },
+    { name: 'Senior QA 1', role: 'senior'  },
+    { name: 'Senior QA 2', role: 'senior'  },
+  ]
+};
+let tempMembers  = [];
 let editId       = null;
 let dragId       = null;
 let ctxId        = null;
@@ -648,33 +640,93 @@ function setConn(state, label) {
 // ──────────────────────────────────────────────
 // Settings
 // ──────────────────────────────────────────────
+// 멤버 이름 추출 헬퍼 (구버전 string 호환)
+function mName(m) { return typeof m === 'string' ? m : (m.name || ''); }
+function mRole(m) { return typeof m === 'string' ? 'qa' : (m.role || 'qa'); }
+function mColor(i) { return MEMBER_COLORS[i % MEMBER_COLORS.length]; }
+
 function applySettings() {
   document.getElementById('h-title').textContent = cfg.boardName || 'QA Team Board';
+
+  // 필터 칩 재생성
+  const chipsEl = document.getElementById('member-chips');
+  chipsEl.innerHTML = '';
   cfg.members.forEach((m, i) => {
-    const fb  = document.getElementById('f' + i);
-    if (fb) fb.textContent = m;
-    const opt = document.querySelector(`#mc-assignee option[value="${i}"]`);
-    if (opt) opt.textContent = m;
+    const btn = document.createElement('button');
+    btn.className = 'chip' + (activeFilter === String(i) ? ' active' : '');
+    btn.dataset.f = String(i);
+    btn.textContent = mName(m);
+    btn.onclick = () => setFilter(String(i));
+    chipsEl.appendChild(btn);
   });
+
+  // 담당자 셀렉트 재생성
+  const sel = document.getElementById('mc-assignee');
+  const cur = sel.value;
+  while (sel.options.length > 1) sel.remove(1);
+  cfg.members.forEach((m, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = mName(m) + ' · ' + (ROLE_LABELS[mRole(m)] || mRole(m));
+    sel.add(opt);
+  });
+  sel.value = cur;
 }
 
 function openSettings() {
+  // 현재 멤버를 tempMembers에 복사
+  tempMembers = cfg.members.map(m => ({ name: mName(m), role: mRole(m) }));
   document.getElementById('s-bname').value = cfg.boardName;
-  cfg.members.forEach((m, i) => { document.getElementById('s-m' + i).value = m; });
+  renderMemberRows();
   showOverlay('modal-settings');
 }
 function closeSettings() { hideOverlay('modal-settings'); }
 
+function renderMemberRows() {
+  const list = document.getElementById('members-list');
+  list.innerHTML = tempMembers.map((m, i) => `
+    <div style="display:flex;align-items:center;gap:8px">
+      <input class="fi" id="s-mn-${i}" type="text" value="${esc(m.name)}" placeholder="이름"
+             style="flex:1" oninput="tempMembers[${i}].name=this.value">
+      <select class="fi" id="s-mr-${i}" onchange="tempMembers[${i}].role=this.value"
+              style="width:160px;flex-shrink:0">
+        <option value="manager" ${m.role==='manager'?'selected':''}>Manager</option>
+        <option value="senior"  ${m.role==='senior' ?'selected':''}>시니어QA (파트장)</option>
+        <option value="qa"      ${m.role==='qa'     ?'selected':''}>QA</option>
+        <option value="junior"  ${m.role==='junior' ?'selected':''}>Junior QA</option>
+      </select>
+      <button onclick="removeMember(${i})"
+              style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:4px;flex-shrink:0"
+              title="삭제">✕</button>
+    </div>
+  `).join('');
+}
+
+function addMember() {
+  tempMembers.push({ name: '', role: 'qa' });
+  renderMemberRows();
+  // 새로 추가된 입력창에 포커스
+  const inputs = document.querySelectorAll('#members-list input');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+}
+
+function removeMember(i) {
+  if (tempMembers.length <= 1) { toast('최소 1명은 있어야 합니다'); return; }
+  tempMembers.splice(i, 1);
+  renderMemberRows();
+}
+
 async function saveSettings() {
   const newCfg = {
     boardName: document.getElementById('s-bname').value.trim() || 'QA Team Board',
-    members:   [0,1,2].map(i => document.getElementById('s-m'+i).value.trim() || cfg.members[i]),
+    members:   tempMembers.filter(m => m.name.trim()),
   };
+  if (!newCfg.members.length) { toast('팀원 이름을 최소 1명 입력해주세요'); return; }
+  closeSettings();
   try {
     await db.ref('kanban/settings').set(newCfg);
     toast('설정이 저장되었습니다 ✓');
   } catch(e) { toast('저장 실패: ' + e.message); }
-  closeSettings();
 }
 
 // ──────────────────────────────────────────────
@@ -735,6 +787,7 @@ async function saveCard() {
     status:    document.getElementById('mc-status').value,
   };
 
+  closeCard();
   try {
     if (editId) {
       await db.ref('kanban/cards/' + editId).update(data);
@@ -743,8 +796,7 @@ async function saveCard() {
       await db.ref('kanban/cards').push({ ...data, createdAt: Date.now() });
       toast('카드가 추가되었습니다 ✓');
     }
-  } catch(e) { toast('저장 실패: ' + e.message); return; }
-  closeCard();
+  } catch(e) { toast('저장 실패: ' + e.message); }
 }
 
 async function deleteCard() {
@@ -791,8 +843,10 @@ function renderCol(status) {
 }
 
 function cardHTML(c) {
-  const aName    = (c.assignee !== null && c.assignee !== undefined) ? (cfg.members[c.assignee] || '') : '';
-  const aColor   = (c.assignee !== null && c.assignee !== undefined) ? (COLORS[c.assignee] || '#64748b') : '';
+  const member   = (c.assignee !== null && c.assignee !== undefined) ? cfg.members[c.assignee] : null;
+  const aName    = member ? mName(member) : '';
+  const aRole    = member ? (ROLE_LABELS[mRole(member)] || mRole(member)) : '';
+  const aColor   = (c.assignee !== null && c.assignee !== undefined) ? mColor(c.assignee) : '#64748b';
   const initials = aName ? aName.slice(0,2).toUpperCase() : '';
   const pLabel   = {high:'높음', medium:'보통', low:'낮음'}[c.priority||'medium'];
   const date     = c.createdAt ? new Date(c.createdAt).toLocaleDateString('ko-KR',{month:'short',day:'numeric'}) : '';
@@ -810,7 +864,7 @@ function cardHTML(c) {
       </div>
       <div class="card-right">
         ${date ? `<span class="card-date">${date}</span>` : ''}
-        ${aName ? `<div class="avatar" style="background:${aColor}" title="${esc(aName)}">${initials}</div>` : ''}
+        ${aName ? `<div class="avatar" style="background:${aColor}" title="${esc(aName)} · ${esc(aRole)}">${initials}</div>` : ''}
       </div>
     </div>
   </div>`;
