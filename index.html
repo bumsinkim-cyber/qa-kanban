@@ -243,6 +243,43 @@
     font-size:12px; color:var(--text-secondary); line-height:1.5;
     white-space: pre-wrap;
   }
+  /* ── Comments ── */
+  .comments-section {
+    border-top: 1px solid var(--border);
+    margin-top: 16px; padding-top: 14px;
+  }
+  .comments-label {
+    font-size:12px; font-weight:600; color:var(--text-secondary);
+    margin-bottom:10px; display:block;
+  }
+  .comments-list {
+    display:flex; flex-direction:column; gap:7px;
+    max-height:180px; overflow-y:auto;
+    margin-bottom:12px;
+  }
+  .comment-item {
+    background: var(--bg-primary);
+    border-radius: 8px;
+    padding: 8px 11px;
+  }
+  .comment-meta {
+    display:flex; align-items:center; gap:6px; margin-bottom:3px;
+  }
+  .comment-avatar {
+    width:18px; height:18px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:8px; font-weight:700; color:#fff; flex-shrink:0;
+  }
+  .comment-author { font-size:12px; font-weight:600; color:var(--text-primary); }
+  .comment-time   { font-size:10px; color:var(--text-muted); margin-left:auto; }
+  .comment-text   { font-size:12px; color:var(--text-secondary); line-height:1.5; }
+  .comment-input-row {
+    display:flex; gap:7px; align-items:center;
+  }
+  .card-comment-count {
+    font-size:11px; color:var(--text-muted);
+    display:flex; align-items:center; gap:3px;
+  }
   .card-desc {
     font-size:12px; color:var(--text-secondary); line-height:1.5;
     margin-bottom:9px;
@@ -451,12 +488,28 @@
       <label>내용 / 문제점</label>
       <textarea class="fi" id="mc-desc" placeholder="현재 상황, 문제점, 메모를 간략히 적어주세요..."></textarea>
     </div>
-    <div class="fg">
-      <label style="display:flex;align-items:center;gap:6px">
-        <span style="background:var(--accent);color:#fff;font-size:10px;padding:2px 7px;border-radius:4px;font-weight:700">팀장 액션</span>
-        해결 방향 / 액션 플랜
-      </label>
-      <textarea class="fi" id="mc-action" placeholder="해결 예정 사항, 진행 중인 액션, 관련 담당자 등을 적어주세요..." style="min-height:70px"></textarea>
+    <div id="action-section" style="display:none">
+      <div class="fg">
+        <label style="display:flex;align-items:center;gap:6px">
+          <span style="background:var(--accent);color:#fff;font-size:10px;padding:2px 7px;border-radius:4px;font-weight:700">팀장 액션</span>
+          해결 방향 / 액션 플랜
+        </label>
+        <textarea class="fi" id="mc-action" placeholder="해결 예정 사항, 진행 중인 액션, 관련 담당자 등을 적어주세요..." style="min-height:70px"></textarea>
+      </div>
+      <div id="comments-section" class="comments-section" style="display:none">
+        <span class="comments-label">💬 팀원 반응</span>
+        <div class="comments-list" id="comments-list">
+          <div style="text-align:center;color:var(--text-muted);font-size:12px;padding:12px 0">아직 댓글이 없습니다</div>
+        </div>
+        <div class="comment-input-row">
+          <select class="fi" id="comment-author" style="width:130px;flex-shrink:0">
+            <option value="-1">이름 선택</option>
+          </select>
+          <input class="fi" id="comment-text" type="text" placeholder="댓글을 입력하세요..."
+                 onkeydown="if(event.key==='Enter')saveComment()">
+          <button class="btn btn-ghost btn-sm" onclick="saveComment()" style="flex-shrink:0;white-space:nowrap">남기기</button>
+        </div>
+      </div>
     </div>
     <div class="grid2">
       <div class="fg">
@@ -565,6 +618,7 @@ let cfg          = {
   ]
 };
 let tempMembers  = [];
+let commentsRef  = null;
 let editId       = null;
 let dragId       = null;
 let ctxId        = null;
@@ -756,6 +810,11 @@ async function saveSettings() {
 // ──────────────────────────────────────────────
 // Cards CRUD
 // ──────────────────────────────────────────────
+function toggleBlockedSections(isBlocked, isEdit) {
+  document.getElementById('action-section').style.display   = isBlocked ? '' : 'none';
+  document.getElementById('comments-section').style.display = (isBlocked && isEdit) ? '' : 'none';
+}
+
 function openAdd(status) {
   defStatus = status || 'todo';
   editId = null;
@@ -769,6 +828,7 @@ function openAdd(status) {
   document.getElementById('mc-status').value         = defStatus;
   document.getElementById('mc-del').style.display    = 'none';
   document.getElementById('mc-title-in').classList.remove('invalid');
+  toggleBlockedSections(defStatus === 'blocked', false);
   applySettings();
   showOverlay('modal-card');
   setTimeout(() => document.getElementById('mc-title-in').focus(), 120);
@@ -788,11 +848,19 @@ function openEdit(id) {
   document.getElementById('mc-status').value         = c.status;
   document.getElementById('mc-del').style.display    = 'inline-flex';
   document.getElementById('mc-title-in').classList.remove('invalid');
+  const isBlocked = c.status === 'blocked';
+  toggleBlockedSections(isBlocked, true);
+  if (isBlocked) loadComments(id);
   applySettings();
+  populateCommentAuthor();
   showOverlay('modal-card');
   setTimeout(() => document.getElementById('mc-title-in').focus(), 120);
 }
-function closeCard() { hideOverlay('modal-card'); }
+
+function closeCard() {
+  if (commentsRef) { commentsRef.off(); commentsRef = null; }
+  hideOverlay('modal-card');
+}
 
 async function saveCard() {
   const titleEl = document.getElementById('mc-title-in');
@@ -884,7 +952,7 @@ function cardHTML(c) {
       <button class="card-menu" onclick="showCtx(event,'${c.id}')">⋯</button>
     </div>
     ${c.desc ? `<div class="card-desc">${esc(c.desc)}</div>` : ''}
-    ${c.action ? `
+    ${c.status === 'blocked' && c.action ? `
     <div class="card-action">
       <span class="card-action-label">▶ 팀장 액션</span>
       <span class="card-action-text">${esc(c.action)}</span>
@@ -895,6 +963,7 @@ function cardHTML(c) {
         <span class="tag tag-${c.priority||'medium'}">${pLabel}</span>
       </div>
       <div class="card-right">
+        ${c.status === 'blocked' ? `<span class="card-comment-count" title="댓글 보기">💬</span>` : ''}
         ${date ? `<span class="card-date">${date}</span>` : ''}
         ${aName ? `<div class="avatar" style="background:${aColor}" title="${esc(aName)} · ${esc(aRole)}">${initials}</div>` : ''}
       </div>
@@ -973,6 +1042,84 @@ async function ctxDelete() {
   try { await db.ref('kanban/cards/' + id).remove(); }
   catch(e) { toast('삭제 실패'); return; }
   toast('카드가 삭제되었습니다');
+}
+
+// 상태 드롭다운 변경 시 팀장 액션 섹션 토글
+document.getElementById('mc-status').addEventListener('change', function() {
+  const isBlocked = this.value === 'blocked';
+  toggleBlockedSections(isBlocked, !!editId);
+  if (isBlocked && editId) loadComments(editId);
+  else if (!isBlocked && commentsRef) { commentsRef.off(); commentsRef = null; }
+});
+
+// ──────────────────────────────────────────────
+// Comments
+// ──────────────────────────────────────────────
+function populateCommentAuthor() {
+  const sel = document.getElementById('comment-author');
+  while (sel.options.length > 1) sel.remove(1);
+  cfg.members.forEach((m, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = mName(m);
+    sel.add(opt);
+  });
+}
+
+function loadComments(cardId) {
+  if (commentsRef) commentsRef.off();
+  commentsRef = db.ref('kanban/card_comments/' + cardId);
+  commentsRef.on('value', snap => {
+    const list = [];
+    snap.forEach(child => list.push({ id: child.key, ...child.val() }));
+    list.sort((a, b) => a.createdAt - b.createdAt);
+    renderComments(list);
+  });
+}
+
+function renderComments(list) {
+  const el = document.getElementById('comments-list');
+  if (!list.length) {
+    el.innerHTML = `<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:12px 0">아직 댓글이 없습니다</div>`;
+    return;
+  }
+  el.innerHTML = list.map(c => {
+    const idx    = c.authorIdx ?? -1;
+    const name   = idx >= 0 ? mName(cfg.members[idx] || {}) : (c.authorName || '익명');
+    const color  = idx >= 0 ? mColor(idx) : '#64748b';
+    const initials = name.slice(0,2).toUpperCase();
+    const time   = c.createdAt ? new Date(c.createdAt).toLocaleDateString('ko-KR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    return `
+    <div class="comment-item">
+      <div class="comment-meta">
+        <div class="comment-avatar" style="background:${color}">${initials}</div>
+        <span class="comment-author">${esc(name)}</span>
+        <span class="comment-time">${time}</span>
+      </div>
+      <div class="comment-text">${esc(c.text)}</div>
+    </div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function saveComment() {
+  const authorVal = document.getElementById('comment-author').value;
+  const text      = document.getElementById('comment-text').value.trim();
+  if (!text) { document.getElementById('comment-text').focus(); return; }
+  if (authorVal === '-1') { toast('이름을 선택해주세요'); return; }
+  if (!editId) return;
+
+  const idx = +authorVal;
+  const comment = {
+    text,
+    authorIdx:  idx,
+    authorName: mName(cfg.members[idx] || {}),
+    createdAt:  Date.now(),
+  };
+  try {
+    await db.ref('kanban/card_comments/' + editId).push(comment);
+    document.getElementById('comment-text').value = '';
+  } catch(e) { toast('댓글 저장 실패: ' + e.message); }
 }
 
 document.addEventListener('click',   e => { if (!e.target.closest('#ctx,.card-menu')) hideCtx(); });
