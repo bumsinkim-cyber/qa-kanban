@@ -7,7 +7,7 @@
 
 <!-- ✅ Firebase SDK v9 (compat mode — 별도 빌드 불필요) -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
 <style>
   :root {
@@ -530,19 +530,17 @@
 
 <script>
 // ══════════════════════════════════════════════════════════════
-//  🔥 FIREBASE 설정 — 아래 값을 Firebase 콘솔에서 복사해 붙여넣으세요
+//  🔥 Firebase Realtime Database 연동
 // ══════════════════════════════════════════════════════════════
 const firebaseConfig = {
-  apiKey: "AIzaSyB-jxcW08yIZzy0gGTdOzQpOJhaPmBnvB0",
-  authDomain: "qa-team-kanban.firebaseapp.com",
-  databaseURL: "https://qa-team-kanban-default-rtdb.firebaseio.com",
-  projectId: "qa-team-kanban",
-  storageBucket: "qa-team-kanban.firebasestorage.app",
+  apiKey:            "AIzaSyB-jxcW08yIZzy0gGTdOzQpOJhaPmBnvB0",
+  authDomain:        "qa-team-kanban.firebaseapp.com",
+  databaseURL:       "https://qa-team-kanban-default-rtdb.firebaseio.com",
+  projectId:         "qa-team-kanban",
+  storageBucket:     "qa-team-kanban.firebasestorage.app",
   messagingSenderId: "727886033585",
-  appId: "1:727886033585:web:1a0f5e56064113918de890",
-  measurementId: "G-SZ1BS57E9N"
+  appId:             "1:727886033585:web:1a0f5e56064113918de890"
 };
-// ══════════════════════════════════════════════════════════════
 
 // ──────────────────────────────────────────────
 // Constants & State
@@ -558,26 +556,14 @@ let ctxId        = null;
 let activeFilter = 'all';
 let defStatus    = 'todo';
 let db           = null;
-let connected    = false;
 
 // ──────────────────────────────────────────────
 // Boot
 // ──────────────────────────────────────────────
 (function boot() {
-  // Check if config is filled
-  if (firebaseConfig.apiKey === 'YOUR_API_KEY') {
-    hideSplash();
-    document.getElementById('config-banner').style.display = 'block';
-    setConn('error', 'Firebase 미설정');
-    document.getElementById('add-btn').disabled = false; // allow UI exploration
-    applySettings();
-    renderAll();
-    return;
-  }
-
   try {
     firebase.initializeApp(firebaseConfig);
-    db = firebase.firestore();
+    db = firebase.database();
     subscribeAll();
   } catch(e) {
     hideSplash();
@@ -593,73 +579,70 @@ function hideSplash() {
 }
 
 // ──────────────────────────────────────────────
-// Firestore Subscriptions
+// Realtime Database Subscriptions
 // ──────────────────────────────────────────────
 function subscribeAll() {
   let cardsReady    = false;
   let settingsReady = false;
 
   // Cards — real-time
-  db.collection('kanban_cards')
-    .orderBy('createdAt', 'asc')
-    .onSnapshot(
-      snap => {
-        cards = snap.docs.map(d => {
-          const data = d.data();
-          return {
-            id:         d.id,
-            title:      data.title      || '',
-            desc:       data.desc       || '',
-            assignee:   data.assignee   ?? null,
-            priority:   data.priority   || 'medium',
-            ticket:     data.ticket     || '',
-            status:     data.status     || 'todo',
-            createdAt:  data.createdAt?.toMillis ? data.createdAt.toMillis() : (data.createdAt || Date.now()),
-          };
+  db.ref('kanban/cards').on('value',
+    snap => {
+      cards = [];
+      snap.forEach(child => {
+        const d = child.val();
+        cards.push({
+          id:        child.key,
+          title:     d.title    || '',
+          desc:      d.desc     || '',
+          assignee:  d.assignee ?? null,
+          priority:  d.priority || 'medium',
+          ticket:    d.ticket   || '',
+          status:    d.status   || 'todo',
+          createdAt: d.createdAt || Date.now(),
         });
-        if (!cardsReady) { cardsReady = true; tryReady(cardsReady, settingsReady); }
-        renderAll();
-      },
-      err => {
-        hideSplash();
-        setConn('error', '읽기 오류');
-        toast('Firestore 오류: ' + err.message);
-      }
-    );
+      });
+      // createdAt 기준 정렬
+      cards.sort((a, b) => a.createdAt - b.createdAt);
+      if (!cardsReady) { cardsReady = true; tryReady(cardsReady, settingsReady); }
+      renderAll();
+    },
+    err => {
+      hideSplash();
+      setConn('error', '읽기 오류');
+      toast('DB 오류: ' + err.message);
+    }
+  );
 
   // Settings — real-time
-  db.collection('kanban_settings').doc('team')
-    .onSnapshot(
-      snap => {
-        if (snap.exists) {
-          const d = snap.data();
-          cfg = {
-            boardName: d.boardName || 'QA Team Board',
-            members:   d.members  || cfg.members,
-          };
-          applySettings();
-          renderAll();
-        }
-        if (!settingsReady) { settingsReady = true; tryReady(cardsReady, settingsReady); }
-      },
-      err => console.warn('Settings read error:', err)
-    );
+  db.ref('kanban/settings').on('value',
+    snap => {
+      const d = snap.val();
+      if (d) {
+        cfg = {
+          boardName: d.boardName || 'QA Team Board',
+          members:   d.members   || cfg.members,
+        };
+        applySettings();
+        renderAll();
+      }
+      if (!settingsReady) { settingsReady = true; tryReady(cardsReady, settingsReady); }
+    },
+    err => console.warn('Settings error:', err)
+  );
 }
 
 function tryReady(c, s) {
   if (c && s) {
     hideSplash();
-    connected = true;
     setConn('connected', '실시간 연결됨');
     document.getElementById('add-btn').disabled = false;
   }
 }
 
 function setConn(state, label) {
-  const dot = document.getElementById('conn-dot');
-  const lbl = document.getElementById('conn-label');
-  dot.className = 'conn-dot ' + (state || '');
-  lbl.textContent = label;
+  document.getElementById('conn-dot').className = 'conn-dot ' + (state || '');
+  document.getElementById('conn-label').textContent = label;
 }
 
 // ──────────────────────────────────────────────
@@ -687,17 +670,10 @@ async function saveSettings() {
     boardName: document.getElementById('s-bname').value.trim() || 'QA Team Board',
     members:   [0,1,2].map(i => document.getElementById('s-m'+i).value.trim() || cfg.members[i]),
   };
-  if (db) {
-    try {
-      await db.collection('kanban_settings').doc('team').set(newCfg);
-      toast('설정이 저장되었습니다 ✓');
-    } catch(e) { toast('저장 실패: ' + e.message); }
-  } else {
-    cfg = newCfg;
-    applySettings();
-    renderAll();
+  try {
+    await db.ref('kanban/settings').set(newCfg);
     toast('설정이 저장되었습니다 ✓');
-  }
+  } catch(e) { toast('저장 실패: ' + e.message); }
   closeSettings();
 }
 
@@ -752,51 +728,31 @@ async function saveCard() {
 
   const data = {
     title,
-    desc:     document.getElementById('mc-desc').value.trim(),
-    assignee: (() => { const v = document.getElementById('mc-assignee').value; return v==='-1' ? null : +v; })(),
-    priority: document.getElementById('mc-priority').value,
-    ticket:   document.getElementById('mc-ticket').value.trim(),
-    status:   document.getElementById('mc-status').value,
+    desc:      document.getElementById('mc-desc').value.trim(),
+    assignee:  (() => { const v = document.getElementById('mc-assignee').value; return v==='-1' ? null : +v; })(),
+    priority:  document.getElementById('mc-priority').value,
+    ticket:    document.getElementById('mc-ticket').value.trim(),
+    status:    document.getElementById('mc-status').value,
   };
 
-  if (db) {
-    try {
-      if (editId) {
-        await db.collection('kanban_cards').doc(editId).update(data);
-        toast('카드가 수정되었습니다 ✓');
-      } else {
-        await db.collection('kanban_cards').add({
-          ...data,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        });
-        toast('카드가 추가되었습니다 ✓');
-      }
-    } catch(e) { toast('저장 실패: ' + e.message); return; }
-  } else {
-    // Offline fallback (no Firebase)
+  try {
     if (editId) {
-      const idx = cards.findIndex(x => x.id === editId);
-      if (idx !== -1) cards[idx] = { ...cards[idx], ...data };
+      await db.ref('kanban/cards/' + editId).update(data);
+      toast('카드가 수정되었습니다 ✓');
     } else {
-      cards.push({ id: Date.now().toString(36), createdAt: Date.now(), ...data });
+      await db.ref('kanban/cards').push({ ...data, createdAt: Date.now() });
+      toast('카드가 추가되었습니다 ✓');
     }
-    renderAll();
-    toast(editId ? '카드가 수정되었습니다 ✓' : '카드가 추가되었습니다 ✓');
-  }
+  } catch(e) { toast('저장 실패: ' + e.message); return; }
   closeCard();
 }
 
 async function deleteCard() {
   if (!editId) return;
   if (!confirm('이 카드를 삭제할까요?')) return;
-  if (db) {
-    try {
-      await db.collection('kanban_cards').doc(editId).delete();
-    } catch(e) { toast('삭제 실패: ' + e.message); return; }
-  } else {
-    cards = cards.filter(x => x.id !== editId);
-    renderAll();
-  }
+  try {
+    await db.ref('kanban/cards/' + editId).remove();
+  } catch(e) { toast('삭제 실패: ' + e.message); return; }
   closeCard();
   toast('카드가 삭제되었습니다');
 }
@@ -835,11 +791,11 @@ function renderCol(status) {
 }
 
 function cardHTML(c) {
-  const aName   = (c.assignee !== null && c.assignee !== undefined) ? (cfg.members[c.assignee] || '') : '';
-  const aColor  = (c.assignee !== null && c.assignee !== undefined) ? (COLORS[c.assignee] || '#64748b') : '';
+  const aName    = (c.assignee !== null && c.assignee !== undefined) ? (cfg.members[c.assignee] || '') : '';
+  const aColor   = (c.assignee !== null && c.assignee !== undefined) ? (COLORS[c.assignee] || '#64748b') : '';
   const initials = aName ? aName.slice(0,2).toUpperCase() : '';
-  const pLabel  = {high:'높음', medium:'보통', low:'낮음'}[c.priority||'medium'];
-  const date    = c.createdAt ? new Date(c.createdAt).toLocaleDateString('ko-KR',{month:'short',day:'numeric'}) : '';
+  const pLabel   = {high:'높음', medium:'보통', low:'낮음'}[c.priority||'medium'];
+  const date     = c.createdAt ? new Date(c.createdAt).toLocaleDateString('ko-KR',{month:'short',day:'numeric'}) : '';
   return `
   <div class="card priority-${c.priority||'medium'}" draggable="true" data-id="${c.id}" ondblclick="openEdit('${c.id}')">
     <div class="card-top">
@@ -897,12 +853,8 @@ async function onDrop(e, status) {
   if (!dragId) return;
   const c = cards.find(x => x.id === dragId);
   if (c && c.status !== status) {
-    if (db) {
-      try { await db.collection('kanban_cards').doc(dragId).update({ status }); }
-      catch(err) { toast('이동 실패: ' + err.message); }
-    } else {
-      c.status = status; renderAll();
-    }
+    try { await db.ref('kanban/cards/' + dragId).update({ status }); }
+    catch(err) { toast('이동 실패: ' + err.message); }
     const lbl = {todo:'할 일', inprog:'진행 중', blocked:'병목/블로커', done:'완료'}[status];
     toast(`→ ${lbl}`);
   }
@@ -921,22 +873,19 @@ function showCtx(e, id) {
   menu.style.top     = Math.min(e.clientY, window.innerHeight - 240) + 'px';
 }
 function hideCtx() { document.getElementById('ctx').style.display='none'; ctxId=null; }
-function ctxEdit()   { const id=ctxId; hideCtx(); openEdit(id); }
+function ctxEdit() { const id=ctxId; hideCtx(); openEdit(id); }
 async function ctxMove(s) {
-  const c = cards.find(x=>x.id===ctxId);
-  if (c) {
-    if (db) { try { await db.collection('kanban_cards').doc(ctxId).update({status:s}); } catch(e){} }
-    else   { c.status=s; renderAll(); }
+  if (ctxId) {
+    try { await db.ref('kanban/cards/' + ctxId).update({ status: s }); } catch(e){}
   }
   hideCtx();
 }
 async function ctxDelete() {
   if (!ctxId) return;
   if (!confirm('이 카드를 삭제할까요?')) return;
-  const id = ctxId;
-  hideCtx();
-  if (db) { try { await db.collection('kanban_cards').doc(id).delete(); } catch(e){ toast('삭제 실패'); return; } }
-  else   { cards = cards.filter(x=>x.id!==id); renderAll(); }
+  const id = ctxId; hideCtx();
+  try { await db.ref('kanban/cards/' + id).remove(); }
+  catch(e) { toast('삭제 실패'); return; }
   toast('카드가 삭제되었습니다');
 }
 
